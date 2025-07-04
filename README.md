@@ -1,4 +1,6 @@
-Package "Access" provides authentication and authorization of users in the system and transmits the URL depending on the user's role Example of "roles.go":
+Package "Access" provides authentication and authorization (using JWT and hashed passwords) of users in the system and transmits the URL depending on the user's role.
+
+Example of "roles.go":
 
 const ( RoleAdmin = "admin" RoleEmployee = "employee" )
 
