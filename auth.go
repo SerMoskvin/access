@@ -12,7 +12,6 @@ type Authenticator struct {
 	jwtSecret []byte
 }
 
-// Конструктор, принимает секрет из конфига
 func NewAuthenticator(secret string) *Authenticator {
 	return &Authenticator{
 		jwtSecret: []byte(secret),
