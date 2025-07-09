@@ -1,6 +1,6 @@
 package access
 
-var permissionsMap = map[string]RolePermissions{
+var PermissionsMap = map[string]RolePermissions{
 	"admin": {
 		Role: "admin",
 		Sections: []Section{
