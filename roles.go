@@ -1,5 +1,18 @@
 package access
 
+type RolePermissions struct {
+	Role           string
+	Sections       []Section
+	OwnRecordsOnly bool
+}
+
+type Section struct {
+	Name     string
+	URL      string
+	CanRead  bool
+	CanWrite bool
+}
+
 var PermissionsMap = map[string]RolePermissions{
 	"admin": {
 		Role: "admin",
