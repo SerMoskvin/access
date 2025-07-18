@@ -1,59 +1,55 @@
 package access
 
+import (
+	"os"
+	"sync"
+
+	"gopkg.in/yaml.v3"
+)
+
 type RolePermissions struct {
-	Role           string
-	Sections       []Section
-	OwnRecordsOnly bool
+	Role           string    `yaml:"role"`
+	Sections       []Section `yaml:"sections"`
+	OwnRecordsOnly bool      `yaml:"own_records_only"`
 }
 
 type Section struct {
-	Name     string
-	URL      string
-	CanRead  bool
-	CanWrite bool
+	Name     string `yaml:"name"`
+	URL      string `yaml:"url"`
+	CanRead  bool   `yaml:"can_read"`
+	CanWrite bool   `yaml:"can_write"`
 }
 
-var PermissionsMap = map[string]RolePermissions{
-	"admin": {
-		Role: "admin",
-		Sections: []Section{
-			{Name: "Расписание", URL: "/schedule", CanRead: true, CanWrite: true},
-			{Name: "Занятия", URL: "/lessons", CanRead: true, CanWrite: true},
-			{Name: "Сотрудники", URL: "/employee", CanRead: true, CanWrite: true},
-			{Name: "Аудитория", URL: "/audience", CanRead: true, CanWrite: true},
-			{Name: "Инструмент", URL: "/instruments", CanRead: true, CanWrite: true},
-			{Name: "Пользователь", URL: "/users", CanRead: true, CanWrite: true},
-			{Name: "Ученики", URL: "/students", CanRead: true, CanWrite: true},
-			{Name: "Группы", URL: "/groups", CanRead: true, CanWrite: true},
-			{Name: "Оценки", URL: "/grades", CanRead: true, CanWrite: true},
-			{Name: "Посещение", URL: "/attendance", CanRead: true, CanWrite: true},
-			{Name: "Программа", URL: "/programs", CanRead: true, CanWrite: true},
-		},
-		OwnRecordsOnly: false,
-	},
-	"teacher": {
-		Role: "teacher",
-		Sections: []Section{
-			{Name: "Оценки", URL: "/grades", CanRead: true, CanWrite: true},
-			{Name: "Посещение", URL: "/attendance", CanRead: true, CanWrite: true},
-		},
-		OwnRecordsOnly: true,
-	},
-	"student": {
-		Role: "student",
-		Sections: []Section{
-			{Name: "Оценки", URL: "/grades", CanRead: true, CanWrite: false},
-			{Name: "Посещение", URL: "/attendance", CanRead: true, CanWrite: false},
-			{Name: "Инструмент", URL: "/instruments", CanRead: true, CanWrite: false},
-		},
-		OwnRecordsOnly: true,
-	},
-	"employee": {
-		Role: "employee",
-		Sections: []Section{
-			{Name: "Аудитория", URL: "/audience", CanRead: true, CanWrite: true},
-			{Name: "Инструмент", URL: "/instruments", CanRead: true, CanWrite: true},
-		},
-		OwnRecordsOnly: false,
-	},
+type PermissionsConfig struct {
+	Roles map[string]RolePermissions `yaml:"roles"`
+}
+
+var (
+	permissionsConfig *PermissionsConfig
+	configOnce        sync.Once
+)
+
+// LoadPermissions загружает конфиг из YAML-файла
+func LoadPermissions(path string) (*PermissionsConfig, error) {
+	var cfg PermissionsConfig
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+// GetPermissions возвращает конфиг (инициализирует его один раз)
+func GetPermissions(path string) (*PermissionsConfig, error) {
+	var err error
+	configOnce.Do(func() {
+		permissionsConfig, err = LoadPermissions(path)
+	})
+	return permissionsConfig, err
 }

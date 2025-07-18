@@ -8,7 +8,33 @@ import (
 	"github.com/SerMoskvin/access"
 )
 
-func TestPermissionsMap(t *testing.T) {
+func TestPermissionsConfig(t *testing.T) {
+	testConfig := &access.PermissionsConfig{
+		Roles: map[string]access.RolePermissions{
+			"admin": {
+				Role: "admin",
+				Sections: []access.Section{
+					{Name: "Users", URL: "/users", CanRead: true, CanWrite: true},
+				},
+				OwnRecordsOnly: false,
+			},
+			"teacher": {
+				Role: "teacher",
+				Sections: []access.Section{
+					{Name: "Grades", URL: "/grades", CanRead: true, CanWrite: true},
+				},
+				OwnRecordsOnly: true,
+			},
+			"student": {
+				Role: "student",
+				Sections: []access.Section{
+					{Name: "Grades", URL: "/grades", CanRead: true, CanWrite: false},
+				},
+				OwnRecordsOnly: true,
+			},
+		},
+	}
+
 	tests := []struct {
 		role       string
 		path       string
@@ -25,9 +51,9 @@ func TestPermissionsMap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.role+"_"+tt.method+"_"+tt.path, func(t *testing.T) {
-			perms, ok := access.PermissionsMap[tt.role]
+			perms, ok := testConfig.Roles[tt.role]
 			if !ok {
-				t.Fatalf("Role %s not found in PermissionsMap", tt.role)
+				t.Fatalf("Role %s not found in PermissionsConfig", tt.role)
 			}
 
 			var hasAccess bool

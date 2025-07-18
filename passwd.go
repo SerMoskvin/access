@@ -2,6 +2,7 @@ package access
 
 import (
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -9,7 +10,9 @@ import (
 )
 
 type Authenticator struct {
-	jwtSecret []byte
+	jwtSecret         []byte
+	permissionsConfig *PermissionsConfig
+	configMu          sync.RWMutex
 }
 
 func NewAuthenticator(secret string) *Authenticator {

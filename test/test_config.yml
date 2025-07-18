@@ -1,0 +1,35 @@
+roles:
+  admin:
+    role: admin
+    own_records_only: false
+    sections:
+      - name: Users
+        url: /users
+        can_read: true
+        can_write: true
+      - name: Students
+        url: /students
+        can_read: true
+        can_write: true
+      - name: Grades
+        url: /grades
+        can_read: true
+        can_write: true
+  
+  teacher:
+    role: teacher
+    own_records_only: true
+    sections:
+      - name: Grades
+        url: /grades
+        can_read: true
+        can_write: true
+  
+  student:
+    role: student
+    own_records_only: true
+    sections:
+      - name: Grades
+        url: /grades
+        can_read: true
+        can_write: false
