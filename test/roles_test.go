@@ -14,21 +14,36 @@ func TestPermissionsConfig(t *testing.T) {
 			"admin": {
 				Role: "admin",
 				Sections: []access.Section{
-					{Name: "Users", URL: "/users", CanRead: true, CanWrite: true},
+					{
+						Name:     "Users",
+						URL:      "/users",
+						CanRead:  true,
+						CanWrite: true,
+					},
 				},
 				OwnRecordsOnly: false,
 			},
 			"teacher": {
 				Role: "teacher",
 				Sections: []access.Section{
-					{Name: "Grades", URL: "/grades", CanRead: true, CanWrite: true},
+					{
+						Name:     "Grades",
+						URL:      "/grades",
+						CanRead:  true,
+						CanWrite: true,
+					},
 				},
 				OwnRecordsOnly: true,
 			},
 			"student": {
 				Role: "student",
 				Sections: []access.Section{
-					{Name: "Grades", URL: "/grades", CanRead: true, CanWrite: false},
+					{
+						Name:     "Grades",
+						URL:      "/grades",
+						CanRead:  true,
+						CanWrite: false,
+					},
 				},
 				OwnRecordsOnly: true,
 			},
@@ -36,21 +51,58 @@ func TestPermissionsConfig(t *testing.T) {
 	}
 
 	tests := []struct {
+		name       string
 		role       string
 		path       string
 		method     string
 		shouldPass bool
 	}{
-		{"admin", "/users", http.MethodGet, true},
-		{"admin", "/users", http.MethodPost, true},
-		{"teacher", "/grades", http.MethodPost, true},
-		{"teacher", "/users", http.MethodGet, false},
-		{"student", "/grades", http.MethodGet, true},
-		{"student", "/grades", http.MethodPost, false},
+		{
+			name:       "Admin can GET /users",
+			role:       "admin",
+			path:       "/users",
+			method:     http.MethodGet,
+			shouldPass: true,
+		},
+		{
+			name:       "Admin can POST /users",
+			role:       "admin",
+			path:       "/users",
+			method:     http.MethodPost,
+			shouldPass: true,
+		},
+		{
+			name:       "Teacher can POST /grades",
+			role:       "teacher",
+			path:       "/grades",
+			method:     http.MethodPost,
+			shouldPass: true,
+		},
+		{
+			name:       "Teacher cannot GET /users",
+			role:       "teacher",
+			path:       "/users",
+			method:     http.MethodGet,
+			shouldPass: false,
+		},
+		{
+			name:       "Student can GET /grades",
+			role:       "student",
+			path:       "/grades",
+			method:     http.MethodGet,
+			shouldPass: true,
+		},
+		{
+			name:       "Student cannot POST /grades",
+			role:       "student",
+			path:       "/grades",
+			method:     http.MethodPost,
+			shouldPass: false,
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.role+"_"+tt.method+"_"+tt.path, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			perms, ok := testConfig.Roles[tt.role]
 			if !ok {
 				t.Fatalf("Role %s not found in PermissionsConfig", tt.role)
@@ -63,7 +115,9 @@ func TestPermissionsConfig(t *testing.T) {
 						hasAccess = true
 						break
 					}
-					if (tt.method == http.MethodPost || tt.method == http.MethodPut || tt.method == http.MethodDelete) && section.CanWrite {
+					if (tt.method == http.MethodPost ||
+						tt.method == http.MethodPut ||
+						tt.method == http.MethodDelete) && section.CanWrite {
 						hasAccess = true
 						break
 					}
@@ -71,7 +125,14 @@ func TestPermissionsConfig(t *testing.T) {
 			}
 
 			if hasAccess != tt.shouldPass {
-				t.Errorf("Expected access %v, got %v for %s %s", tt.shouldPass, hasAccess, tt.method, tt.path)
+				t.Errorf(
+					"Access mismatch for %s: %s %s (expected %v, got %v)",
+					tt.role,
+					tt.method,
+					tt.path,
+					tt.shouldPass,
+					hasAccess,
+				)
 			}
 		})
 	}

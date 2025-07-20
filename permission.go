@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -19,7 +19,6 @@ const (
 	userClaimsKey contextKey = "GOMusic_contextKey"
 )
 
-// Извлечение JWT из заголовка Authorization
 func extractToken(r *http.Request) string {
 	bearerToken := r.Header.Get("Authorization")
 	if bearerToken == "" {
@@ -34,19 +33,41 @@ func extractToken(r *http.Request) string {
 
 func (a *Authenticator) CheckPermissions(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg, err := GetPermissions("path/to/permissions.yml")
-		if err != nil {
-			http.Error(w, "Ошибка загрузки прав доступа", http.StatusInternalServerError)
-			return
+		a.configMu.RLock()
+		cfg := a.permissionsConfig
+		a.configMu.RUnlock()
+
+		if cfg == nil {
+			if err := a.LoadPermissions(a.cfg.Permissions.Path); err != nil {
+				http.Error(w, "Failed to load permissions configuration", http.StatusInternalServerError)
+				return
+			}
+			a.configMu.RLock()
+			cfg = a.permissionsConfig
+			a.configMu.RUnlock()
 		}
 
 		tokenString := extractToken(r)
-		claims, err := a.ParseJWT(tokenString)
+		if tokenString == "" {
+			http.Error(w, "Authorization required", http.StatusUnauthorized)
+			return
+		}
+
+		claims, err := a.JwtService.ParseJWT(tokenString)
+		if err != nil {
+			http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
+			return
+		}
 
 		role, ok := claims["role"].(string)
-		perms, ok := cfg.Roles[role] // Теперь берём из конфига!
 		if !ok {
-			http.Error(w, "Доступ запрещён: роль не найдена", http.StatusForbidden)
+			http.Error(w, "Invalid role in token", http.StatusForbidden)
+			return
+		}
+
+		perms, ok := cfg.Roles[role]
+		if !ok {
+			http.Error(w, "Access denied: role not found", http.StatusForbidden)
 			return
 		}
 
@@ -56,93 +77,104 @@ func (a *Authenticator) CheckPermissions(next http.Handler) http.Handler {
 		var hasAccess bool
 		for _, section := range perms.Sections {
 			if strings.HasPrefix(path, section.URL) {
-				if method == http.MethodGet && section.CanRead {
-					hasAccess = true
-					break
+				switch method {
+				case http.MethodGet, http.MethodHead, http.MethodOptions:
+					if section.CanRead {
+						hasAccess = true
+						break
+					}
+				case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+					if section.CanWrite {
+						hasAccess = true
+						break
+					}
 				}
-				if (method == http.MethodPost || method == http.MethodPut || method == http.MethodDelete) && section.CanWrite {
-					hasAccess = true
-					break
-				}
+			}
+			if hasAccess {
+				break
 			}
 		}
 
 		if !hasAccess {
-			http.Error(w, "Доступ запрещён", http.StatusForbidden)
+			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		}
+
 		ctx := context.WithValue(r.Context(), userClaimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// Проверка доступа только к записям по своему ID
 func (a *Authenticator) CheckOwnRecords(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Получаем claims из контекста
 		claims, ok := r.Context().Value(userClaimsKey).(jwt.MapClaims)
 		if !ok {
-			http.Error(w, "User claims not found", http.StatusInternalServerError)
+			http.Error(w, "Authentication required", http.StatusUnauthorized)
 			return
 		}
 
-		// Извлекаем роль пользователя
 		role, ok := claims["role"].(string)
-		if !ok {
-			http.Error(w, "Invalid role in token", http.StatusForbidden)
+		userID, okID := claims["user_id"].(float64)
+		if !ok || !okID {
+			http.Error(w, "Invalid user credentials", http.StatusForbidden)
 			return
 		}
+		intUserID := int(userID)
 
-		// Извлекаем ID пользователя
-		userID, ok := claims["user_id"].(float64)
-		if !ok {
-			http.Error(w, "Invalid user ID in token", http.StatusForbidden)
-			return
-		}
+		a.configMu.RLock()
+		permsConfig := a.permissionsConfig
+		a.configMu.RUnlock()
 
-		// Загружаем конфиг permissions
-		cfg, err := GetPermissions("path/to/permissions.yml")
-		if err != nil {
-			http.Error(w, "Failed to load permissions config", http.StatusInternalServerError)
-			return
-		}
-
-		// Получаем права для роли
-		perms, ok := cfg.Roles[role]
-		if !ok {
-			http.Error(w, "Access denied: unknown role", http.StatusForbidden)
-			return
-		}
-
-		// Проверяем ограничение на свои записи
-		if perms.OwnRecordsOnly {
-			requestedID := chi.URLParam(r, "id")
-			if requestedID != fmt.Sprintf("%.0f", userID) {
-				http.Error(w, "You can only access your own records", http.StatusForbidden)
+		if permsConfig == nil {
+			if err := a.LoadPermissions(a.cfg.Permissions.Path); err != nil {
+				http.Error(w, "Configuration error", http.StatusInternalServerError)
 				return
 			}
+			a.configMu.RLock()
+			permsConfig = a.permissionsConfig
+			a.configMu.RUnlock()
+		}
 
-			// Для POST/PUT/PATCH дополнительно проверяем body
-			if method := r.Method; method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch {
-				bodyBytes, err := io.ReadAll(r.Body)
-				if err != nil {
-					http.Error(w, "Failed to read request body", http.StatusBadRequest)
-					return
+		perms, ok := permsConfig.Roles[role]
+		if !ok || !perms.OwnRecordsOnly {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if requestedID := chi.URLParam(r, "id"); requestedID != "" && requestedID != strconv.Itoa(intUserID) {
+			http.Error(w, "Access to this resource is denied", http.StatusForbidden)
+			return
+		}
+
+		if isModifyingMethod(r.Method) {
+			bodyBytes, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Invalid request", http.StatusBadRequest)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+			if bytes.Contains(bodyBytes, []byte(`"user_id"`)) {
+				var body struct {
+					UserID int `json:"user_id"`
 				}
-
-				// Восстанавливаем тело для дальнейшего использования
-				r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-
-				var body map[string]interface{}
-				if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&body); err == nil {
-					if bodyID, ok := body["user_id"].(float64); ok && int(bodyID) != int(userID) {
-						http.Error(w, "Cannot modify other users' data", http.StatusForbidden)
-						return
-					}
+				if err := json.Unmarshal(bodyBytes, &body); err == nil && body.UserID != 0 && body.UserID != intUserID {
+					http.Error(w, "Data ownership violation", http.StatusForbidden)
+					return
 				}
 			}
 		}
 
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), contextKey("user_id"), intUserID)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func isModifyingMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
 }

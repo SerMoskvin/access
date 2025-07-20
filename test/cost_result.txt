@@ -1,0 +1,17 @@
+BCrypt Cost Benchmark Results
+============================
+Cost  4: 1.032ms
+Cost  5: 1.5393ms
+Cost  6: 3.5939ms
+Cost  7: 7.2344ms
+Cost  8: 14.2776ms
+Cost  9: 27.8359ms
+Cost 10: 55.9777ms
+Cost 11: 110.8227ms
+Cost 12: 239.4619ms
+Cost 13: 448.169ms
+Cost 14: 893.117ms
+Cost 15: 1.7839237s
+Cost 16: 3.5872396s
+
+Benchmark completed. Results saved to cost_result.txt

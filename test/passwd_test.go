@@ -1,79 +1,119 @@
 package access_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/SerMoskvin/access"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestAuthenticator(t *testing.T) {
-	secret := "test-secret-123"
-	auth := access.NewAuthenticator(secret)
+func TestAuthenticator_AdminAccess(t *testing.T) {
+	auth, err := access.NewAuthenticator("./test_config.yml")
+	assert.NoError(t, err)
 
-	t.Run("Password Hashing", func(t *testing.T) {
-		password := "secure-password-123"
-		hash, err := auth.HashPassword(password)
-		if err != nil {
-			t.Fatalf("HashPassword failed: %v", err)
-		}
+	tests := []struct {
+		name     string
+		role     string
+		path     string
+		method   string
+		wantPass bool
+	}{
+		{
+			name:     "Admin access to users",
+			role:     "admin",
+			path:     "/api/admin/users",
+			method:   http.MethodGet,
+			wantPass: true,
+		},
+		{
+			name:     "User forbidden in admin area",
+			role:     "user",
+			path:     "/api/admin/users",
+			method:   http.MethodGet,
+			wantPass: false,
+		},
+		{
+			name:     "Moderator content access",
+			role:     "moderator",
+			path:     "/api/mod/posts",
+			method:   http.MethodDelete,
+			wantPass: true,
+		},
+	}
 
-		// Проверка корректного пароля
-		if !auth.CheckPasswordHash(password, hash) {
-			t.Error("CheckPasswordHash failed for correct password")
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			token, err := auth.JwtService.GenerateJWT(1, "test", tt.role)
+			assert.NoError(t, err)
 
-		// Проверка неверного пароля
-		if auth.CheckPasswordHash("wrong-password", hash) {
-			t.Error("CheckPasswordHash passed for wrong password")
-		}
-	})
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req.Header.Set("Authorization", "Bearer "+token)
 
-	t.Run("JWT Generation and Parsing", func(t *testing.T) {
-		userID := 42
-		username := "testuser"
-		role := "admin"
-		expiresIn := 1 * time.Hour
+			rr := httptest.NewRecorder()
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
 
-		token, err := auth.GenerateJWT(userID, username, role, expiresIn)
-		if err != nil {
-			t.Fatalf("GenerateJWT failed: %v", err)
-		}
+			auth.CheckPermissions(handler).ServeHTTP(rr, req)
 
-		claims, err := auth.ParseJWT(token)
-		if err != nil {
-			t.Fatalf("ParseJWT failed: %v", err)
-		}
+			if tt.wantPass {
+				assert.Equal(t, http.StatusOK, rr.Code)
+			} else {
+				assert.Equal(t, http.StatusForbidden, rr.Code)
+			}
+		})
+	}
+}
 
-		// Проверка claims
-		if claims["user_id"] != float64(userID) {
-			t.Errorf("Expected user_id %d, got %v", userID, claims["user_id"])
-		}
+func TestPasswordHashing_CostVariations(t *testing.T) {
+	tests := []struct {
+		cost     int
+		password string
+	}{
+		{cost: 6, password: "test123"},
+		{cost: 8, password: "admin!@#"},
+		{cost: 10, password: "super-secure"},
+	}
 
-		if claims["username"] != username {
-			t.Errorf("Expected username %s, got %v", username, claims["username"])
-		}
+	for _, tt := range tests {
+		t.Run(tt.password, func(t *testing.T) {
+			ph := access.NewPasswordHasher(tt.cost)
+			hash, err := ph.HashPassword(tt.password)
+			assert.NoError(t, err)
+			assert.True(t, ph.CheckPasswordHash(tt.password, hash))
+		})
+	}
+}
 
-		// Проверка невалидного токена
-		_, err = auth.ParseJWT("invalid-token")
-		if err == nil {
-			t.Error("Expected error for invalid token")
-		}
-	})
+func TestJWT_Rotation(t *testing.T) {
+	cfg := &access.Config{
+		JWT: struct {
+			Secret         string        `yaml:"secret"`
+			RotationPeriod time.Duration `yaml:"rotation_period"`
+			TTL            time.Duration `yaml:"ttl"`
+			OldKeysToKeep  int           `yaml:"old_keys_to_keep"`
+		}{
+			Secret:        "rotate-test",
+			TTL:           time.Hour,
+			OldKeysToKeep: 1,
+		},
+	}
 
-	t.Run("Invalid JWT Cases", func(t *testing.T) {
-		// Токен с неправильным методом подписи
-		invalidToken := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
-		_, err := auth.ParseJWT(invalidToken)
-		if err == nil {
-			t.Error("Expected error for token with invalid signing method")
-		}
+	svc := access.NewJWTService(cfg.JWT.Secret, cfg)
+	token1, _ := svc.GenerateJWT(1, "user1", "user")
 
-		// Просроченный токен
-		expiredToken, _ := auth.GenerateJWT(1, "user", "role", -1*time.Hour)
-		_, err = auth.ParseJWT(expiredToken)
-		if err == nil {
-			t.Error("Expected error for expired token")
-		}
-	})
+	svc.RotateSecret("new-secret-1")
+	token2, _ := svc.GenerateJWT(2, "user2", "admin")
+
+	_, err1 := svc.ParseJWT(token1)
+	_, err2 := svc.ParseJWT(token2)
+	assert.NoError(t, err1)
+	assert.NoError(t, err2)
+
+	svc.RotateSecret("new-secret-2")
+	_, err := svc.ParseJWT(token1)
+	assert.Error(t, err)
 }

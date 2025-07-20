@@ -1,68 +1,24 @@
 package access
 
-import (
-	"errors"
-	"sync"
-	"time"
+import "golang.org/x/crypto/bcrypt"
 
-	"github.com/golang-jwt/jwt/v4"
-	"golang.org/x/crypto/bcrypt"
-)
-
-type Authenticator struct {
-	jwtSecret         []byte
-	permissionsConfig *PermissionsConfig
-	configMu          sync.RWMutex
+type PasswordHasher struct {
+	cost int
 }
 
-func NewAuthenticator(secret string) *Authenticator {
-	return &Authenticator{
-		jwtSecret: []byte(secret),
+func NewPasswordHasher(cost int) *PasswordHasher {
+	if cost == 0 {
+		cost = bcrypt.DefaultCost
 	}
+	return &PasswordHasher{cost: cost}
 }
 
-func (a *Authenticator) HashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+func (p *PasswordHasher) HashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), p.cost)
 	return string(bytes), err
 }
 
-func (a *Authenticator) CheckPasswordHash(password, hash string) bool {
+func (p *PasswordHasher) CheckPasswordHash(password, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	return err == nil
-}
-
-// Генерация токена
-func (a *Authenticator) GenerateJWT(userID int, username, role string, expiresIn time.Duration) (string, error) {
-	claims := jwt.MapClaims{
-		"user_id":  userID,
-		"username": username,
-		"role":     role,
-		"exp":      time.Now().Add(expiresIn).Unix(),
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(a.jwtSecret)
-}
-
-// Парсинг и валидация токена
-func (a *Authenticator) ParseJWT(tokenString string) (jwt.MapClaims, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return a.jwtSecret, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if !token.Valid {
-		return nil, errors.New("invalid token")
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, errors.New("cannot parse claims")
-	}
-	return claims, nil
 }

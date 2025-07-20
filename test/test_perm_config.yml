@@ -1,0 +1,35 @@
+roles:
+  user:
+    role: user
+    own_records_only: true
+    sections:
+      - name: user_profile
+        url: "/api/user"
+        can_read: true
+        can_write: true
+      - name: user_posts
+        url: "/api/posts"
+        can_read: true
+        can_write: true
+
+  admin:
+    role: admin
+    own_records_only: false
+    sections:
+      - name: admin_users
+        url: "/api/admin/users"
+        can_read: true
+        can_write: true
+      - name: admin_system
+        url: "/api/admin/system"
+        can_read: true
+        can_write: true
+
+  moderator:
+    role: moderator
+    own_records_only: false
+    sections:
+      - name: mod_content
+        url: "/api/mod"
+        can_read: true
+        can_write: true
