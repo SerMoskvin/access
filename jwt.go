@@ -11,17 +11,19 @@ import (
 )
 
 type JWTService struct {
-	currentSecret []byte
-	oldSecrets    [][]byte
+	CurrentSecret []byte
+	OldSecrets    [][]byte
 	mu            sync.RWMutex
 	cfg           *Config
+	auth          *Authenticator
 }
 
-func NewJWTService(secret string, cfg *Config) *JWTService {
+func NewJWTService(secret string, cfg *Config, auth *Authenticator) *JWTService {
 	return &JWTService{
-		currentSecret: []byte(secret),
-		oldSecrets:    make([][]byte, 0),
+		CurrentSecret: []byte(secret),
+		OldSecrets:    make([][]byte, 0),
 		cfg:           cfg,
+		auth:          auth,
 	}
 }
 
@@ -29,13 +31,17 @@ func (j *JWTService) RotateSecret(newSecret string) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
-	j.oldSecrets = append(j.oldSecrets, j.currentSecret)
-	j.currentSecret = []byte(newSecret)
-
-	// Оставляем только необходимое количество старых ключей
-	if len(j.oldSecrets) > j.cfg.JWT.OldKeysToKeep {
-		j.oldSecrets = j.oldSecrets[len(j.oldSecrets)-j.cfg.JWT.OldKeysToKeep:]
+	// Если уже есть старые ключи, удаляем самые старые
+	if len(j.OldSecrets) >= j.cfg.JWT.OldKeysToKeep && j.cfg.JWT.OldKeysToKeep > 0 {
+		j.OldSecrets = j.OldSecrets[1:]
 	}
+
+	// Добавляем текущий ключ в старые
+	if j.cfg.JWT.OldKeysToKeep > 0 {
+		j.OldSecrets = append(j.OldSecrets, j.CurrentSecret)
+	}
+
+	j.CurrentSecret = []byte(newSecret)
 }
 
 func (j *JWTService) GenerateJWT(userID int, username, role string) (string, error) {
@@ -50,7 +56,7 @@ func (j *JWTService) GenerateJWT(userID int, username, role string) (string, err
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(j.currentSecret)
+	return token.SignedString(j.CurrentSecret)
 }
 
 func generateRandomSecret() string {
@@ -62,17 +68,23 @@ func generateRandomSecret() string {
 }
 
 func (j *JWTService) ParseJWT(tokenString string) (jwt.MapClaims, error) {
-	claims, err := j.parseWithSecret(tokenString, j.currentSecret)
+	if claims, ok := j.auth.TokenCache.Get(tokenString); ok {
+		return claims.(jwt.MapClaims), nil
+	}
+
+	claims, err := j.parseWithSecret(tokenString, j.CurrentSecret)
 	if err == nil {
+		j.auth.TokenCache.Set(tokenString, claims)
 		return claims, nil
 	}
 
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 
-	for _, secret := range j.oldSecrets {
+	for _, secret := range j.OldSecrets {
 		claims, err := j.parseWithSecret(tokenString, secret)
 		if err == nil {
+			j.auth.TokenCache.Set(tokenString, claims)
 			return claims, nil
 		}
 	}

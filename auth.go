@@ -11,6 +11,11 @@ type Authenticator struct {
 	permissionsConfig *PermissionsConfig
 	configMu          sync.RWMutex
 	cfg               *Config
+
+	// Кэши
+	TokenCache      *memoryCache
+	passwordCache   *memoryCache
+	permissionCache *memoryCache
 }
 
 func NewAuthenticator(configPath string) (*Authenticator, error) {
@@ -20,16 +25,22 @@ func NewAuthenticator(configPath string) (*Authenticator, error) {
 	}
 
 	auth := &Authenticator{
-		JwtService:     NewJWTService(cfg.JWT.Secret, cfg),
-		passwordHasher: NewPasswordHasher(cfg.Password.Cost),
-		cfg:            cfg,
+		cfg: cfg,
 	}
+
+	// Инициализируем кэши из конфига
+	auth.TokenCache = NewCache(cfg.Cache.TokenTTL)
+	auth.passwordCache = NewCache(cfg.Cache.PasswordTTL)
+	auth.permissionCache = NewCache(cfg.Cache.PermissionTTL)
+
+	// Инициализация сервисов с передачей auth
+	auth.JwtService = NewJWTService(cfg.JWT.Secret, cfg, auth)
+	auth.passwordHasher = NewPasswordHasher(cfg.Password.Cost, auth)
 
 	if err := auth.LoadPermissions(cfg.Permissions.Path); err != nil {
 		return nil, err
 	}
 
-	// Запускаем ротацию ключей по таймеру
 	if cfg.JWT.RotationPeriod > 0 {
 		go auth.startKeyRotation()
 	}

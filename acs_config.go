@@ -22,6 +22,12 @@ type Config struct {
 	Password struct {
 		Cost int `yaml:"cost"` //Сложность хэширования пароля, оптимальное значение - 12. Больше информации в тестах
 	} `yaml:"password"`
+
+	Cache struct {
+		TokenTTL      time.Duration `yaml:"token_ttl"`
+		PasswordTTL   time.Duration `yaml:"password_ttl"`
+		PermissionTTL time.Duration `yaml:"permission_ttl"`
+	} `yaml:"cache"`
 }
 
 func LoadConfig(path string) (*Config, error) {

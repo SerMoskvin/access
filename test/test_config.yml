@@ -9,3 +9,8 @@ permissions:
 
 password:
   cost: 4
+
+cache:
+  token_ttl: "12h"    
+  password_ttl: "5m"  
+  permission_ttl: "1m" 

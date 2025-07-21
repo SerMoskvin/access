@@ -53,10 +53,18 @@ func (a *Authenticator) CheckPermissions(next http.Handler) http.Handler {
 			return
 		}
 
-		claims, err := a.JwtService.ParseJWT(tokenString)
-		if err != nil {
-			http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
-			return
+		// Кэширование токена
+		var claims jwt.MapClaims
+		if cachedClaims, ok := a.TokenCache.Get(tokenString); ok {
+			claims = cachedClaims.(jwt.MapClaims)
+		} else {
+			var err error
+			claims, err = a.JwtService.ParseJWT(tokenString)
+			if err != nil {
+				http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
+				return
+			}
+			a.TokenCache.Set(tokenString, claims)
 		}
 
 		role, ok := claims["role"].(string)
@@ -65,14 +73,26 @@ func (a *Authenticator) CheckPermissions(next http.Handler) http.Handler {
 			return
 		}
 
+		path := r.URL.Path
+		method := r.Method
+
+		// Кэширование прав доступа
+		cacheKey := role + ":" + path + ":" + method
+		if cachedAccess, ok := a.permissionCache.Get(cacheKey); ok {
+			if !cachedAccess.(bool) {
+				http.Error(w, "Access denied", http.StatusForbidden)
+				return
+			}
+			ctx := context.WithValue(r.Context(), userClaimsKey, claims)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
 		perms, ok := cfg.Roles[role]
 		if !ok {
 			http.Error(w, "Access denied: role not found", http.StatusForbidden)
 			return
 		}
-
-		path := r.URL.Path
-		method := r.Method
 
 		var hasAccess bool
 		for _, section := range perms.Sections {
@@ -94,6 +114,8 @@ func (a *Authenticator) CheckPermissions(next http.Handler) http.Handler {
 				break
 			}
 		}
+
+		a.permissionCache.Set(cacheKey, hasAccess)
 
 		if !hasAccess {
 			http.Error(w, "Access denied", http.StatusForbidden)

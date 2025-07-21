@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/SerMoskvin/access"
 	"github.com/stretchr/testify/assert"
@@ -69,6 +68,9 @@ func TestAuthenticator_AdminAccess(t *testing.T) {
 }
 
 func TestPasswordHashing_CostVariations(t *testing.T) {
+	auth, err := access.NewAuthenticator("./test_config.yml")
+	assert.NoError(t, err)
+
 	tests := []struct {
 		cost     int
 		password string
@@ -80,7 +82,7 @@ func TestPasswordHashing_CostVariations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.password, func(t *testing.T) {
-			ph := access.NewPasswordHasher(tt.cost)
+			ph := access.NewPasswordHasher(tt.cost, auth)
 			hash, err := ph.HashPassword(tt.password)
 			assert.NoError(t, err)
 			assert.True(t, ph.CheckPasswordHash(tt.password, hash))
@@ -89,31 +91,60 @@ func TestPasswordHashing_CostVariations(t *testing.T) {
 }
 
 func TestJWT_Rotation(t *testing.T) {
-	cfg := &access.Config{
-		JWT: struct {
-			Secret         string        `yaml:"secret"`
-			RotationPeriod time.Duration `yaml:"rotation_period"`
-			TTL            time.Duration `yaml:"ttl"`
-			OldKeysToKeep  int           `yaml:"old_keys_to_keep"`
-		}{
-			Secret:        "rotate-test",
-			TTL:           time.Hour,
-			OldKeysToKeep: 1,
-		},
-	}
+	auth, err := access.NewAuthenticator("./test_config.yml")
+	assert.NoError(t, err)
 
-	svc := access.NewJWTService(cfg.JWT.Secret, cfg)
+	svc := auth.JwtService
+
+	// 1. Первый токен
 	token1, _ := svc.GenerateJWT(1, "user1", "user")
 
+	// 2. Первая ротация (должна сохранить исходный ключ)
 	svc.RotateSecret("new-secret-1")
 	token2, _ := svc.GenerateJWT(2, "user2", "admin")
 
-	_, err1 := svc.ParseJWT(token1)
-	_, err2 := svc.ParseJWT(token2)
-	assert.NoError(t, err1)
-	assert.NoError(t, err2)
+	// Очищаем кеш перед проверкой
+	auth.TokenCache.Clear()
 
+	// Оба токена должны работать
+	_, err = svc.ParseJWT(token1)
+	assert.NoError(t, err)
+
+	_, err = svc.ParseJWT(token2)
+	assert.NoError(t, err)
+
+	// 3. Вторая ротация (должна удалить исходный ключ)
 	svc.RotateSecret("new-secret-2")
-	_, err := svc.ParseJWT(token1)
-	assert.Error(t, err)
+	auth.TokenCache.Clear() // Очищаем кеш
+
+	// token1 НЕ должен проходить проверку
+	_, err = svc.ParseJWT(token1)
+	if err == nil {
+		t.Fatal("Token1 should be invalid after second rotation")
+	}
+
+	// token2 должен работать
+	_, err = svc.ParseJWT(token2)
+	assert.NoError(t, err)
+
+	// 4. Третья ротация (должна удалить new-secret-1)
+	svc.RotateSecret("new-secret-3")
+	auth.TokenCache.Clear() // Очищаем кеш
+
+	// token2 НЕ должен проходить проверку
+	_, err = svc.ParseJWT(token2)
+	if err == nil {
+		t.Fatal("Token2 should be invalid after third rotation")
+	}
+
+	// token1 тем более не должен работать
+	_, err = svc.ParseJWT(token1)
+	if err == nil {
+		t.Fatal("Token1 should still be invalid")
+	}
+
+	// Новый токен должен работать
+	token3, _ := svc.GenerateJWT(3, "user3", "admin")
+	_, err = svc.ParseJWT(token3)
+	assert.NoError(t, err)
 }
