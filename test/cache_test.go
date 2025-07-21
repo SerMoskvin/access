@@ -1,6 +1,8 @@
 package access_test
 
 import (
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -70,4 +72,120 @@ func TestMemoryCache(t *testing.T) {
 			<-done
 		}
 	})
+}
+
+// TestResult - структура для хранения результатов тестирования
+type TestResult struct {
+	Name       string
+	FirstCall  time.Duration
+	TotalTime  time.Duration
+	AvgPerCall time.Duration
+}
+
+var performanceResults []TestResult
+
+const performanceIterations = 1000000
+
+func TestJWT_CachePerformance(t *testing.T) {
+	auth, err := access.NewAuthenticator("./test_config.yml")
+	assert.NoError(t, err)
+
+	// Генерация тестового токена
+	token, err := auth.JwtService.GenerateJWT(1, "user", "admin")
+	assert.NoError(t, err)
+
+	// Тест 1: С кешем (повторные вызовы)
+	t.Run("With cache (repeated calls)", func(t *testing.T) {
+		auth.TokenCache.Clear()
+
+		start := time.Now()
+		_, err := auth.JwtService.ParseJWT(token)
+		assert.NoError(t, err)
+		firstCall := time.Since(start)
+
+		start = time.Now()
+		for i := 0; i < performanceIterations; i++ {
+			_, _ = auth.JwtService.ParseJWT(token)
+		}
+		totalTime := time.Since(start)
+
+		performanceResults = append(performanceResults, TestResult{
+			Name:       "With cache",
+			FirstCall:  firstCall,
+			TotalTime:  totalTime,
+			AvgPerCall: totalTime / performanceIterations,
+		})
+	})
+
+	// Тест 2: Без кеша
+	t.Run("Without cache", func(t *testing.T) {
+		start := time.Now()
+		for i := 0; i < performanceIterations; i++ {
+			auth.TokenCache.Clear()
+			_, _ = auth.JwtService.ParseJWT(token)
+		}
+		totalTime := time.Since(start)
+
+		performanceResults = append(performanceResults, TestResult{
+			Name:       "Without cache",
+			FirstCall:  0,
+			TotalTime:  totalTime,
+			AvgPerCall: totalTime / performanceIterations,
+		})
+	})
+
+	// Тест 3: Смешанные токены
+	t.Run("Mixed tokens (10 unique)", func(t *testing.T) {
+		tokens := make([]string, 10)
+		for i := range tokens {
+			tokens[i], _ = auth.JwtService.GenerateJWT(i+1, "user", "admin")
+		}
+
+		start := time.Now()
+		for i := 0; i < performanceIterations; i++ {
+			token := tokens[i%len(tokens)]
+			_, _ = auth.JwtService.ParseJWT(token)
+		}
+		totalTime := time.Since(start)
+
+		performanceResults = append(performanceResults, TestResult{
+			Name:       "Mixed tokens",
+			FirstCall:  0,
+			TotalTime:  totalTime,
+			AvgPerCall: totalTime / performanceIterations,
+		})
+	})
+
+	printPerformanceResults()
+}
+
+func printPerformanceResults() {
+	resultStr := "\n=== JWT Cache Performance Results ===\n"
+	resultStr += fmt.Sprintf("Iterations: %d\n", performanceIterations)
+	resultStr += "+-----------------+----------------+----------------+----------------+\n"
+	resultStr += "|      Test       |   First Call   |   Total Time   |  Avg Per Call  |\n"
+	resultStr += "+-----------------+----------------+----------------+----------------+\n"
+
+	for _, r := range performanceResults {
+		firstCall := "-"
+		if r.FirstCall > 0 {
+			firstCall = fmt.Sprintf("%10v", r.FirstCall.Round(time.Microsecond))
+		}
+
+		resultStr += fmt.Sprintf("| %-15s | %14s | %14s | %14s |\n",
+			r.Name,
+			firstCall,
+			r.TotalTime.Round(time.Millisecond),
+			r.AvgPerCall.Round(time.Nanosecond))
+	}
+
+	resultStr += "+-----------------+----------------+----------------+----------------+\n"
+
+	fmt.Println(resultStr)
+
+	if err := os.WriteFile("jwt_cache_performance.txt", []byte(resultStr), 0644); err != nil {
+		fmt.Printf("Failed to write results: %v\n", err)
+	} else {
+		fmt.Println("Results saved to jwt_cache_performance.txt")
+	}
 }
