@@ -16,7 +16,7 @@ import (
 type contextKey string
 
 const (
-	userClaimsKey contextKey = "GOMusic_contextKey"
+	UserClaimsKey contextKey = "GOMusic_contextKey"
 )
 
 func extractToken(r *http.Request) string {
@@ -83,7 +83,7 @@ func (a *Authenticator) CheckPermissions(next http.Handler) http.Handler {
 				http.Error(w, "Access denied", http.StatusForbidden)
 				return
 			}
-			ctx := context.WithValue(r.Context(), userClaimsKey, claims)
+			ctx := context.WithValue(r.Context(), UserClaimsKey, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -122,14 +122,14 @@ func (a *Authenticator) CheckPermissions(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), userClaimsKey, claims)
+		ctx := context.WithValue(r.Context(), UserClaimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 func (a *Authenticator) CheckOwnRecords(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		claims, ok := r.Context().Value(userClaimsKey).(jwt.MapClaims)
+		claims, ok := r.Context().Value(UserClaimsKey).(jwt.MapClaims)
 		if !ok {
 			http.Error(w, "Authentication required", http.StatusUnauthorized)
 			return

@@ -7,7 +7,7 @@ import (
 
 type Authenticator struct {
 	JwtService        *JWTService
-	passwordHasher    *PasswordHasher
+	PasswordHasher    *PasswordHasher
 	permissionsConfig *PermissionsConfig
 	configMu          sync.RWMutex
 	cfg               *Config
@@ -35,7 +35,7 @@ func NewAuthenticator(configPath string) (*Authenticator, error) {
 
 	// Инициализация сервисов с передачей auth
 	auth.JwtService = NewJWTService(cfg.JWT.Secret, cfg, auth)
-	auth.passwordHasher = NewPasswordHasher(cfg.Password.Cost, auth)
+	auth.PasswordHasher = NewPasswordHasher(cfg.Password.Cost, auth)
 
 	if err := auth.LoadPermissions(cfg.Permissions.Path); err != nil {
 		return nil, err
