@@ -1,0 +1,27 @@
+BCrypt Cost Benchmark Results explanation
+Processor: AMD Ryzen 5 2600 Six-Core Processor(12 CPUs), ~3.8GHz
+============================
+Cost 4: 1.0324ms, security_level - very low
+Cost 5: 2.0592ms
+Cost 6: 3.5684ms, security_level - low
+Cost 7: 6.718ms
+Cost 8: 13.8621ms, security_level - basic
+Cost 9: 27.5162ms
+Cost 10: 54.8072ms, security_level - medium
+Cost 11: 111.5034ms
+Cost 12: 221.6961ms, security_level - high
+Cost 13: 443.8642ms
+Cost 14: 887.4888ms, security_level - very high
+Cost 15: 1.7754009s
+Cost 16: 3.5510006s, security_level - extreme
+Cost 17: 7.0991419s
+Cost 18: 14.201339s
+Cost 19: 28.3916272s
+Cost 20: 56.7988886s
+Cost 21: 1m53.5688047s
+Cost 22: 3m47.2463327s
+Cost 23: ~7m34s
+Cost 24: ~15m08s
+Cost 25: ~30m16s
+...
+Cost 31: theoretical maximum, ~8h
