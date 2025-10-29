@@ -135,9 +135,9 @@ func (a *Authenticator) CheckOwnRecords(next http.Handler) http.Handler {
 			return
 		}
 
-		role, ok := claims["role"].(string)
-		userID, okID := claims["user_id"].(float64)
-		if !ok || !okID {
+		role, roleOk := claims["role"].(string)
+		userID, userIDOk := claims["user_id"].(float64)
+		if !roleOk || !userIDOk {
 			http.Error(w, "Invalid user credentials", http.StatusForbidden)
 			return
 		}
@@ -159,15 +159,21 @@ func (a *Authenticator) CheckOwnRecords(next http.Handler) http.Handler {
 
 		perms, ok := permsConfig.Roles[role]
 		if !ok || !perms.OwnRecordsOnly {
-			next.ServeHTTP(w, r)
+			// Если у роли нет ограничения по своим записям, просто добавляем user_id в контекст
+			ctx := context.WithValue(r.Context(), contextKey("user_id"), intUserID)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 
-		if requestedID := chi.URLParam(r, "id"); requestedID != "" && requestedID != strconv.Itoa(intUserID) {
-			http.Error(w, "Access to this resource is denied", http.StatusForbidden)
-			return
+		// Проверка URL параметра
+		if requestedID := chi.URLParam(r, "id"); requestedID != "" {
+			if parsedID, err := strconv.Atoi(requestedID); err == nil && parsedID != intUserID {
+				http.Error(w, "Access to this resource is denied", http.StatusForbidden)
+				return
+			}
 		}
 
+		// Проверка body для модифицирующих методов
 		if isModifyingMethod(r.Method) {
 			bodyBytes, err := io.ReadAll(r.Body)
 			if err != nil {
@@ -177,12 +183,26 @@ func (a *Authenticator) CheckOwnRecords(next http.Handler) http.Handler {
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 			if bytes.Contains(bodyBytes, []byte(`"user_id"`)) {
-				var body struct {
-					UserID int `json:"user_id"`
-				}
-				if err := json.Unmarshal(bodyBytes, &body); err == nil && body.UserID != 0 && body.UserID != intUserID {
-					http.Error(w, "Data ownership violation", http.StatusForbidden)
-					return
+				var body map[string]interface{}
+				if err := json.Unmarshal(bodyBytes, &body); err == nil {
+					if bodyUserID, exists := body["user_id"]; exists {
+						var bodyUserIDInt int
+						switch v := bodyUserID.(type) {
+						case float64:
+							bodyUserIDInt = int(v)
+						case int:
+							bodyUserIDInt = v
+						case string:
+							if parsed, err := strconv.Atoi(v); err == nil {
+								bodyUserIDInt = parsed
+							}
+						}
+
+						if bodyUserIDInt != 0 && bodyUserIDInt != intUserID {
+							http.Error(w, "Data ownership violation", http.StatusForbidden)
+							return
+						}
+					}
 				}
 			}
 		}
